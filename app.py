@@ -83,5 +83,15 @@ def main():
             st.error(f"Chyba při zpracování souborů: {e}")
 
 if __name__ == "__main__":
+    st.markdown(
+    """
+    <hr>
+    <div style="text-align: center; color: gray; font-size: 0.9em;">
+        © 2025 Luboš Binar
+    </div>
+    """,
+    unsafe_allow_html=True
+)
     main()
+
 
