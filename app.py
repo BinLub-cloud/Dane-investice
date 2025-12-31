@@ -45,7 +45,7 @@ def process_dividends(dividends):
     return yearly_div
 
 def main():
-    st.title("XTB – Kompletní daňový přehled")
+    st.title("Výpočet základu daně - XTB broker")
 
     st.markdown(
         """
@@ -93,5 +93,6 @@ if __name__ == "__main__":
     unsafe_allow_html=True
 )
     main()
+
 
 
