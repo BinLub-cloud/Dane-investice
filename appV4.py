@@ -14,28 +14,27 @@ EPS = 1e-9
 
 
 # =====================
-# NORMALIZACE XTB CSV
+# NORMALIZACE XTB – CLOSED POSITIONS
 # =====================
 def normalize_trades(df):
     df = df.copy()
 
-    # přejmenování sloupců (XTB CZ/EN)
+    # mapování názvů (CZ + EN)
     COLUMN_MAP = {
+        "Symbol": "symbol",
         "Open time": "open_time",
         "Close time": "close_time",
-        "Action": "side",
-        "Symbol": "symbol",
-        "Volume": "volume",
         "Open price": "open_price",
         "Close price": "close_price",
+        "Volume": "volume",
         "Commission": "commission",
-        "Instrument type": "instrument_type",
+        "Type": "type",
+        "Category": "category",
     }
     df = df.rename(columns=COLUMN_MAP)
 
-    # kontrola povinných sloupců
-    required = ["open_time", "close_time", "side", "symbol",
-                "volume", "open_price", "close_price", "instrument_type"]
+    required = ["symbol", "open_time", "close_time",
+                "open_price", "close_price", "volume"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         st.error(f"Chybí sloupce v CSV: {missing}")
@@ -49,29 +48,36 @@ def normalize_trades(df):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # jen akcie + ETF (CFD pryč)
-    df = df[df["instrument_type"].isin(["STC", "ETF"])]
+    # -----------------
+    # FILTRACE CFD
+    # -----------------
+    if "category" in df.columns:
+        df = df[~df["category"].str.contains("CFD", case=False, na=False)]
+    elif "type" in df.columns:
+        df = df[~df["type"].str.contains("CFD", case=False, na=False)]
+    else:
+        # fallback – CFD mají typicky .CFD
+        df = df[~df["symbol"].str.contains("CFD", case=False, na=False)]
 
-    # rozdělení na BUY a SELL (XTB má vše v jednom řádku)
-    buys = df[df["side"] == "BUY"].copy()
-    sells = df[df["side"] == "SELL"].copy()
-
-    buys = buys.assign(
-        Time=buys["open_time"],
+    # -----------------
+    # ROZSEKÁNÍ NA BUY / SELL
+    # -----------------
+    buys = df.assign(
+        Time=df["open_time"],
         Side="BUY",
-        Price=buys["open_price"],
-        Volume=buys["volume"],
-        Commission=buys.get("commission", 0),
-        Symbol=buys["symbol"],
+        Price=df["open_price"],
+        Volume=df["volume"],
+        Commission=df.get("commission", 0),
+        Symbol=df["symbol"],
     )
 
-    sells = sells.assign(
-        Time=sells["close_time"],
+    sells = df.assign(
+        Time=df["close_time"],
         Side="SELL",
-        Price=sells["close_price"],
-        Volume=sells["volume"],
-        Commission=sells.get("commission", 0),
-        Symbol=sells["symbol"],
+        Price=df["close_price"],
+        Volume=df["volume"],
+        Commission=df.get("commission", 0),
+        Symbol=df["symbol"],
     )
 
     normalized = pd.concat([buys, sells], ignore_index=True)
@@ -154,41 +160,13 @@ def summarize_fifo(fifo_df):
 
 
 # =====================
-# DIVIDENDY §8
-# =====================
-def process_dividends(df):
-    df = df[df["Type"] == "DIVIDENT"].copy()
-
-    df["Time"] = pd.to_datetime(df["Time"], dayfirst=True, errors="coerce")
-    df["Year"] = df["Time"].dt.year
-    df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
-
-    df["div_hruba"] = df["Amount"] / (1 - SAZBA_ZAHRANICNI_DANE)
-    df["zahranicni_dan"] = df["div_hruba"] * SAZBA_ZAHRANICNI_DANE
-
-    return df.groupby("Year").agg(
-        dividendy_hrube=("div_hruba", "sum"),
-        zahranicni_dan=("zahranicni_dan", "sum"),
-    ).round(2)
-
-
-# =====================
 # STREAMLIT APP
 # =====================
 def main():
     st.set_page_config(page_title="FIFO daně – XTB", layout="wide")
     st.title("📊 Daňový výpočet FIFO – XTB (akcie + ETF)")
 
-    st.markdown("""
-    ✔ FIFO dle českého práva  
-    ✔ Frakční kusy  
-    ✔ Časový test 3 roky  
-    ✔ CFD ignorováno  
-    ✔ Originální XTB CSV (bez úprav)  
-    """)
-
     trades_file = st.file_uploader("📁 XTB – Obchody (CSV)", type="csv")
-    dividends_file = st.file_uploader("📁 XTB – Dividendy (CSV)", type="csv")
 
     if trades_file:
         trades_raw = pd.read_csv(
@@ -205,26 +183,9 @@ def main():
         st.subheader("🔍 Detail FIFO (kontrola FÚ)")
         st.dataframe(fifo_df.round(2))
 
-    if dividends_file:
-        dividends_raw = pd.read_csv(
-            dividends_file, sep=";", decimal=",", encoding="utf-8"
-        )
-
-        div = process_dividends(dividends_raw)
-        div["dan_cz"] = div["dividendy_hrube"] * SAZBA_DANE
-        div["doplatek"] = (div["dan_cz"] - div["zahranicni_dan"]).clip(lower=0)
-
-        st.subheader("💰 §8 – Dividendy")
-        st.dataframe(div)
-
-    st.info("""
-    **Daňové přiznání (ČR):**
-    - §10 → Příloha č. 2 (ř. 207–209)
-    - §8 → Příloha č. 3 (ř. 38, 43)
-    """)
-
-    st.warning("⚠️ Aplikace je technická pomůcka, nenahrazuje daňového poradce.")
+    st.warning("⚠️ Technický výpočet – nenahrazuje daňového poradce.")
 
 
 if __name__ == "__main__":
     main()
+
